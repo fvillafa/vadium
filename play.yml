@@ -1,0 +1,69 @@
+---
+- name: Upgrades a Linux installation
+  become: yes
+  hosts: all
+  gather_facts: yes
+  vars:
+     apt_dist_upgrade: true
+
+     deb_hold_packages:
+        - jenkins
+        - git-lfs
+        - postgresql
+        - mysql-server
+
+     rpm_exclude_packages: "jenkins,git-lfs,postgresql*,mysql*"
+
+  tasks:
+   - name: For RPM based systems
+     block:
+
+          - name: upgrade all packages
+            yum:
+              name: '*'
+              state: latest
+              exclude: "{{ rpm_exclude_packages }}"
+
+     when: ansible_os_family != "Debian"
+
+   - name: For DEB basd systems
+     block:
+
+          - name: Update cache if it's older than four hours
+            apt:
+              update_cache: yes
+              cache_valid_time: 14400
+
+          - name: Put packages on hold
+            dpkg_selections:
+              name: "{{ item }}"
+              selection: hold
+            loop: "{{ deb_hold_packages }}"
+
+          - name: apt-get upgrade
+            apt:
+              name: "*"
+              state: latest
+              only_upgrade: yes
+              install_recommends: no
+              dpkg_options: "force-confdef,force-confold"
+            register: apt_upgrade_status
+
+          - name: apt-get dist-upgrade
+            apt:
+              upgrade: dist
+            register: dist_upgrade_status
+            when: apt_dist_upgrade|d(false)|bool
+
+          - name: remove unused dependencies
+            apt:
+              autoremove: yes
+            register: apt_autoremove_status
+            when: apt_autoremove|d(false)|bool
+
+     when: ansible_os_family == "Debian"
+
+   - name: reboot the host for kernel upgrade
+     reboot:
+       msg: "reboot initiated by Ansible"
+     when: host_reboot|d(false)|bool
